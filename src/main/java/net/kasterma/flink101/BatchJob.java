@@ -18,7 +18,11 @@ package net.kasterma.flink101;
  * limitations under the License.
  */
 
+import lombok.val;
 import org.apache.flink.api.java.ExecutionEnvironment;
+
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * Skeleton for a Flink Batch Job.
@@ -46,6 +50,12 @@ public class BatchJob {
 		// set up the batch execution environment
 		final ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 
+		Integer[] xs = {1,2,3,4,5};
+		List<Integer> xsl = Arrays.asList(xs);
+
+		val src = env.fromCollection(xsl);
+
+		src.print();
 		/**
 		 * Here, you can start creating your execution plan for Flink.
 		 *
@@ -71,6 +81,6 @@ public class BatchJob {
 		 */
 
 		// execute program
-		env.execute("Flink Batch Java API Skeleton");
+		//env.execute("Flink Batch Java API Skeleton");
 	}
 }

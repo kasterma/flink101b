@@ -1,73 +1,59 @@
 package net.kasterma.flink101;
 
-/**
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
+import lombok.extern.slf4j.Slf4j;
+import lombok.val;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
 
+import java.util.Arrays;
+import java.util.List;
 
-/**
- * Skeleton for a Flink Streaming Job.
- *
- * <p>For a full example of a Flink Streaming Job, see the SocketTextStreamWordCount.java
- * file in the same package/directory or have a look at the website.
- *
- * <p>You can also generate a .jar file that you can submit on your Flink
- * cluster.
- * Just type
- * 		mvn clean package
- * in the projects root directory.
- * You will find the jar in
- * 		target/kasterma-flink101-0.0.0-SNAPSHOT.jar
- * From the CLI you can then run
- * 		./bin/flink run -c net.kasterma.flink101.StreamingJob target/kasterma-flink101-0.0.0-SNAPSHOT.jar
- *
- * <p>For more information on the CLI see:
- *
- * <p>http://flink.apache.org/docs/latest/apis/cli.html
- */
+class ForeveryOnes extends RichSourceFunction<Integer> {
+    private Boolean running = true;
+
+    @Override
+    public void run(SourceContext<Integer> sourceContext) throws Exception {
+        while (running) {
+            sourceContext.collect(1);
+            Thread.sleep(1000);
+        }
+    }
+
+    @Override
+    public void cancel() {
+        running = false;
+    }
+}
+
+class Ble implements SourceFunction<Integer> {
+
+    @Override
+    public void run(SourceContext<Integer> sourceContext) throws Exception {
+
+    }
+
+    @Override
+    public void cancel() {
+
+    }
+}
+
+@Slf4j
 public class StreamingJob {
 
-	public static void main(String[] args) throws Exception {
-		// set up the streaming execution environment
-		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+    public static void main(String[] args) throws Exception {
+        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
-		/**
-		 * Here, you can start creating your execution plan for Flink.
-		 *
-		 * Start with getting some data from the environment, like
-		 * 	env.readTextFile(textPath);
-		 *
-		 * then, transform the resulting DataStream<String> using operations
-		 * like
-		 * 	.filter()
-		 * 	.flatMap()
-		 * 	.join()
-		 * 	.coGroup()
-		 *
-		 * and many more.
-		 * Have a look at the programming guide for the Java API:
-		 *
-		 * http://flink.apache.org/docs/latest/apis/streaming/index.html
-		 *
-		 */
+        Integer[] xs = {1, 2, 3, 4, 5};
+        List<Integer> xsl = Arrays.asList(xs);
 
-		// execute program
-		env.execute("Flink Streaming Java API Skeleton");
-	}
+        val src1 = env.fromCollection(xsl);
+
+        val src = env.addSource(new ForeveryOnes());
+
+        src.print();
+
+        env.execute("Flink Streaming Experiment 1");
+    }
 }
