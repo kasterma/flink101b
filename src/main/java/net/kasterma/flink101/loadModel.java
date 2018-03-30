@@ -82,7 +82,7 @@ class mapFn extends RichCoMapFunction<Integer, Param, Integer> {
     @Override
     public Integer map2(Param param) throws Exception {
         log.info("update param");
-        if (new Random().nextFloat() > 0.5) {
+        if (true) {
             mulby = param.getVal();
             log.info("updated");
         } else {
