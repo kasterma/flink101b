@@ -4,8 +4,6 @@ import lombok.extern.slf4j.Slf4j;
 import lombok.val;
 import org.apache.flink.api.common.functions.AggregateFunction;
 import org.apache.flink.streaming.api.TimeCharacteristic;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.IterativeStream;
 import org.apache.flink.streaming.api.datastream.KeyedStream;
 import org.apache.flink.streaming.api.datastream.WindowedStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -37,12 +35,15 @@ class ForeverRandomWT extends RichSourceFunction<Integer> {
         while (running) {
             long current_time = System.currentTimeMillis();
             log.info("current_time: {}", current_time);
+
             sourceContext.collectWithTimestamp(random.nextInt(100), current_time);
-            if (current_time > lastMark + 1000) {
-                log.info("send water mark yo");
+
+            if (current_time >= lastMark + 2500) {  // when started with sleep = 1000, reliably send every third one a watermark
+                log.info("send water mark: {}", current_time);
                 lastMark = current_time;
                 sourceContext.emitWatermark(new Watermark(current_time));
             }
+
             Thread.sleep(sleep);
         }
     }
@@ -58,7 +59,14 @@ class ForeverRandomWT extends RichSourceFunction<Integer> {
 class Above50WM extends Trigger<IntPair, GlobalWindow> {
     @Override
     public TriggerResult onElement(IntPair element, long timestamp, GlobalWindow window, TriggerContext ctx) throws Exception {
-        log.info("WATERMARK: {}", ctx.getCurrentWatermark());
+        Long now = System.currentTimeMillis();
+        log.info("Trigger: current time {}", System.currentTimeMillis());
+        log.info("Trigger: current watermark: {}", ctx.getCurrentWatermark());
+        Long wm = ctx.getCurrentWatermark();
+        log.info("Trigger: triggeredBy {}", element);
+        log.info("Trigger: delay {}", now - wm);
+        log.info("Trigger ss: {}\n{}", Thread.currentThread().getName(),
+                Thread.currentThread().getStackTrace());
         if (element.getY() > 50) {
             return TriggerResult.FIRE;
         } else {
@@ -92,13 +100,20 @@ class SumIntPairValuesSlowOdd implements AggregateFunction<IntPair, List<Integer
 
     @Override
     public List<Integer> add(IntPair value, List<Integer> accumulator) {
-        log.info("add");
+        log.info("add {}", value);
+        log.info("aggregate ss: {}\n{}", Thread.currentThread().getName(),
+                Thread.currentThread().getStackTrace());
+        try {
+            Thread.sleep(6500L);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
         if (value.getX() % 2 == 1) {
-            try {
-                Thread.sleep(20000L);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+//            try {
+//                Thread.sleep(10000L);
+//            } catch (InterruptedException e) {
+//                e.printStackTrace();
+//            }
         }
         accumulator.add(value.getY());
         return accumulator;
@@ -131,7 +146,7 @@ public class StreamingWatermarks {
                         .keyBy(x -> x.getX() % 2);
 
         WindowedStream<IntPair, Integer, GlobalWindow> tt = src.window(GlobalWindows.create());
-        tt.trigger(new Above50WM()).aggregate(new SumIntPairValuesSlowOdd()).print();
+        tt.trigger(new Above50WM()).aggregate(new SumIntPairValuesSlowOdd()).disableChaining().print();
 
         env.execute("Flink Streaming Experiment 1");
     }
