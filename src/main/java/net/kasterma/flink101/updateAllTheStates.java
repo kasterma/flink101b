@@ -1,6 +1,5 @@
 package net.kasterma.flink101;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
@@ -10,47 +9,82 @@ import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.state.KeyedStateFunction;
 import org.apache.flink.streaming.api.datastream.BroadcastStream;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.co.KeyedBroadcastProcessFunction;
-import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction;
+import org.apache.flink.streaming.api.functions.co.RichCoMapFunction;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
 import org.apache.flink.util.Collector;
-import org.apache.flink.util.OutputTag;
-import scopt.Zero;
 
 import java.util.Random;
 
-@Data
-@AllArgsConstructor
-class Event {
-    final int key;
-    final int val;
-}
-
-@Data
-@AllArgsConstructor
-class OutEvent {
-    final int key;
-    final int val;
-}
-
 @Slf4j
-class KeyedEvents extends RichSourceFunction<Event> {
-    private final Random random = new Random();
+class TwosThrees extends RichSourceFunction<Integer> {
+    private Integer last = 2;
     private Boolean running = true;
     private final Long sleep;
 
-    KeyedEvents(Long sleep) {
+    TwosThrees(Long sleep) {
         super();
         this.sleep = sleep;
     }
 
     @Override
-    public void run(SourceContext<Event> sourceContext) throws Exception {
+    public void run(SourceContext<Integer> sourceContext) throws Exception {
         while (running) {
-            sourceContext.collect(new Event(random.nextInt(10), 2));
+            last = last == 2 ? 3 : 2;
+            sourceContext.collect(last);
+            Thread.sleep(sleep);
+        }
+    }
+
+    @Override
+    public void cancel() {
+        running = false;
+    }
+}
+
+@Data
+class Message {
+    private Boolean resetState = false;
+    private Integer value = 0;
+}
+
+@Slf4j
+class BroadCastSource extends RichSourceFunction<Message> {
+    private final Long sleep;
+    private final Long forgetIterations;
+    private Long iteration = 0L;
+    private Boolean running = true;
+    private final Random random = new Random();
+
+    BroadCastSource(Long sleep, Long forgetIterations) {
+        super();
+        this.sleep = sleep;
+        this.forgetIterations = forgetIterations;
+    }
+
+    @Override
+    public void run(SourceContext<Message> sourceContext) throws Exception {
+        while (running) {
+            Message m = new Message();
+            log.info("it {} fi {}", iteration, forgetIterations);
+            if (iteration.equals(forgetIterations)) {
+                // emit forget state event
+                iteration = 0L;
+                log.info("resetstaet");
+                m.setResetState(true);
+            } else {
+                log.info("blalbalbalbalsdjfkaljfahdgajklfdj");
+                iteration++;
+                // emit update model event
+                m.setValue(random.nextInt(5) + 1);
+            }
+            sourceContext.collect(m);
             Thread.sleep(sleep);
         }
     }
@@ -62,17 +96,11 @@ class KeyedEvents extends RichSourceFunction<Event> {
 }
 
 @Slf4j
-class AggregateMultipliedSums extends KeyedBroadcastProcessFunction<Integer, Event, Param, OutEvent> {
-    final OutputTag<Integer> keysTag;
-
-    public AggregateMultipliedSums(final OutputTag<Integer> keysTag) {
-        this.keysTag = keysTag;
-    }
-
+class AggregateMultipliedSums extends KeyedBroadcastProcessFunction<Integer, Integer, Message, Integer> {
     private int mulby = 2; // operator state   (broadcast)
 
     // TODO: set this state to zero (the customer profile)
-    private ValueState<Integer> currentSum;  // keyed state
+    private ValueState<Integer> currentSum;
 
     @Override
     public void open(Configuration parameters) throws Exception {
@@ -84,80 +112,85 @@ class AggregateMultipliedSums extends KeyedBroadcastProcessFunction<Integer, Eve
     }
 
     @Override
-    public void processElement(Event event, KeyedReadOnlyContext keyedReadOnlyContext, Collector<OutEvent> collector) throws Exception {
+    public void processElement(Integer event, KeyedReadOnlyContext keyedReadOnlyContext, Collector<Integer> collector) throws Exception {
         int currentVal = currentSum.value() == null ? 0 : currentSum.value();
-        currentVal += event.getVal() * mulby;
-        collector.collect(new OutEvent(event.getKey(), currentVal));
-        keyedReadOnlyContext.output(keysTag, event.getKey());
+        currentVal += event * mulby;
+        collector.collect(currentVal);
         currentSum.update(currentVal);
     }
 
-    @Override
-    public void processBroadcastElement(Param param, KeyedContext keyedContext, Collector<OutEvent> collector) throws Exception {
-        mulby = param.getVal();
-        log.info("mullby now: {}", mulby);
-    }
-}
+    class FFS extends KeyedStateFunction<Integer, ValueState<Integer>> {
 
-class ZeroAllStates {}
-
-
-@Slf4j
-class SlowZeroAllStates extends RichSourceFunction<ZeroAllStates> {
-    private final Random random = new Random();
-    private Boolean running = true;
-    private final Long sleep;
-
-    SlowZeroAllStates(Long sleep) {
-        super();
-        this.sleep = sleep;
-    }
-
-    @Override
-    public void run(SourceContext<ZeroAllStates> sourceContext) throws Exception {
-        while (running) {
-            sourceContext.collect(new ZeroAllStates());
-            Thread.sleep(sleep);
+        @Override
+        public void process(Integer integer, ValueState<Integer> integerValueState) throws Exception {
+            integerValueState.update(0);
         }
     }
 
     @Override
-    public void cancel() {
-        running = false;
+    public void processBroadcastElement(Message m, KeyedContext keyedContext, Collector<Integer> collector) throws Exception {
+        if (m.getResetState()){
+            keyedContext.applyToKeyedState(new ValueStateDescriptor<Integer>("current-sum",
+                    TypeInformation.of(new TypeHint<Integer>() {})), new FFS());  //currentSum.update(0);
+            log.info("zero");
+            mulby = 0;
+        } else {
+            mulby = m.getValue();
+            log.info("mullby now: {}", mulby);
+        }
     }
 }
 
 @Slf4j
+class mapFn2 extends RichCoMapFunction<Integer, Message, Integer> {
+    int mulby = 2;
+
+    @Override
+    public Integer map1(Integer integer) throws Exception {
+        return integer * mulby;
+    }
+
+    @Override
+    public Integer map2(Message param) throws Exception {
+        log.info("update param");
+        if (!param.getResetState()) {
+            mulby = param.getValue();
+            log.info("updated");
+        } else {
+            log.info("no update");
+        }
+        return 999;
+    }
+
+//    @Override
+//    public Integer map(Param in) throws Exception {
+//        if (in.isParam()) {
+//            return 99999;
+//        } else {
+//            return in.getVal() * 2;
+//        }
+//    }
+}
+
+@Slf4j
 public class updateAllTheStates {
+    static KeySelector<Integer, Integer> ks = (i) -> i;
+
     public static void main(String[] args) throws Exception {
         log.info("started");
 
         final val env = StreamExecutionEnvironment.getExecutionEnvironment();
 
-        OutputTag<Integer> keysTag = new OutputTag<Integer>("keys-seen") {};
+        // stream of ordinary events (think pageviews)
+        DataStream<Integer> events = env.addSource(new TwosThrees(1000L)).keyBy((i) -> i);
 
-        val events = env.addSource(new KeyedEvents(1000L));
-
-        BroadcastStream<Param> pararmUpdates = env.addSource(new SlowRandom(5*1000L))
-                .map(Param::new)
+        // stream of update model and reinitialize state events
+        BroadcastStream<Message> broadcastEvents = env.addSource(new BroadCastSource(10_000L, 3L))
                 .broadcast(new MapStateDescriptor<>("name", BasicTypeInfo.INT_TYPE_INFO, BasicTypeInfo.INT_TYPE_INFO));
 
-        val stateUpdates = env.addSource(new SlowZeroAllStates(10*1000L));
+        val outEvents = events.connect(broadcastEvents).process(new AggregateMultipliedSums());  // combine in the broadcast
 
-        events.print();
-        //pararmUpdates.print();
-
-        val outnos = events.keyBy(x -> x.getKey());
-        //val out2 = outnos.connect(pararmUpdates);
-        //val out3 = outnos.flatMap(new keymapFnWState());
-
-        val sumsSoFar = outnos.connect(pararmUpdates).process(new AggregateMultipliedSums(keysTag));
-
-        val keyStream = sumsSoFar.getSideOutput(keysTag).map(k -> "keykeykey" + k); // .print();
-
-        val keyupdatestream = stateUpdates.union(keyStream).mapwithstate(fffff);  // TODO: make work
-
-        sumsSoFar.print();
+        outEvents.print();
 
         env.execute("show me the numbers");
     }
